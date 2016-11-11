@@ -1,0 +1,465 @@
+<!-- -*- mode: javascript; -*- -->
+<html>
+<head>
+<title>uvBox</title>
+<style type="text/css">
+    
+canvas {
+    border: 1px solid red;
+}
+
+#context_menu {
+    margin: 0px;
+    background-color: lightblue;
+    border: 2px solid blue;
+    display: none;
+    position: absolute
+}
+
+.hidden {
+    background-color: black;
+    display: none;
+}
+
+</style>
+</head>
+
+<body>
+<script type="text/javascript">
+    
+function loadScript(str)
+{
+    var body = document.getElementsByTagName('body').item(0);
+    
+    var scriptElement;
+    scriptElement = document.createElement("script");
+    scriptElement.setAttribute('type', 'text/javascript');
+    scriptElement.setAttribute('src', str + "?" + String(new Date().getTime()));
+    body.appendChild(scriptElement);
+}
+
+</script>
+
+<script type="text/javascript">
+loadScript("Common/Utils.js");
+loadScript("Common/Vec.js");
+loadScript("Common/Math.js");
+loadScript("Common/Debug.js");
+loadScript("View.js");
+
+var g_Globals =
+{
+    frameCount: 0,
+    lsp:
+    {
+        x: 189,
+        y: 80
+    },
+    uv:
+    {
+        x: 286,
+        y: 143
+    },
+    screenDim: { width: 256, height: 256 },
+    screenOffset: { x: 128, y: 128 },
+    // thetaItr: -Math.PI*0.27135,
+    thetaItr: 0.0,
+    // thetaStep: 0.0005
+    thetaStep: 0.0000
+};
+
+function onRender(view)
+{
+    g_Globals.frameCount++;
+    var ctx = view.ctx;
+    
+    var screenOffset = g_Globals.screenOffset;
+    var screenDim = g_Globals.screenDim;
+    
+    // uv box
+    ctx.strokeStyle = "rgb(0,0,0)";
+    ctx.beginPath();
+    ctx.moveTo(screenOffset.x,                   screenOffset.y);
+    ctx.lineTo(screenOffset.x + screenDim.width, screenOffset.y);
+    ctx.lineTo(screenOffset.x + screenDim.width, screenOffset.y + screenDim.height);
+    ctx.lineTo(screenOffset.x,                   screenOffset.y + screenDim.height);
+    ctx.lineTo(screenOffset.x,                   screenOffset.y);
+    ctx.stroke();
+
+    var lspInit = new GVec(2);
+    var uvInit = new GVec(2);
+    
+    var theta = Math.PI + g_Globals.thetaItr * 2.0 * Math.PI;
+    var rayRay = GVec.aI(Math.cos(theta), Math.sin(theta));
+    rayRay.x += 0.5;
+    rayRay.y += 0.5;
+    
+    if (g_Globals.thetaStep > 0.001)
+    {
+        if (g_Globals.thetaItr < 0.0 || g_Globals.thetaItr >= 1.0)
+        {
+            // Debug.log("log % theta: % ray: %", g_Globals.thetaItr, theta, rayRay.toString());
+            g_Globals.thetaStep *= -1;
+        }
+        
+        g_Globals.thetaItr += g_Globals.thetaStep;
+    }
+
+    if (g_Globals.thetaStep > 0.001)
+    {
+        GVec.vecMul(uvInit, rayRay, GVec.aI(screenDim.width, screenDim.height));
+        // GVec.vecMul(uvInit,  GVec.aI(0.8, 0.4), GVec.aI(screenDim.width, screenDim.height));
+        // jiv where this thing is initialized
+        GVec.vecMul(lspInit, GVec.aI(0.7, 0.5), GVec.aI(screenDim.width, screenDim.height));
+
+        lspInit.x += screenOffset.x;
+        lspInit.y += screenOffset.y;
+        uvInit.x += screenOffset.x;
+        uvInit.y += screenOffset.y;
+        
+        g_Globals.lsp.x = lspInit.x;
+        g_Globals.lsp.y = lspInit.y;
+        g_Globals.uv.x = uvInit.x;
+        g_Globals.uv.y = uvInit.y;
+    }
+    
+    // lsp
+    var lsp = g_Globals.lsp;
+    if (lsp.x != undefined && lsp.y != undefined)
+    {
+        ctx.fillStyle = "red";
+        ctx.beginPath();
+        ctx.arc(lsp.x, lsp.y, 5, 2*Math.PI, false);
+        ctx.fill();
+    }
+    
+    var uv = g_Globals.uv;
+    if (uv.x != undefined && uv.y != undefined)
+    {
+        ctx.fillStyle = "green";
+        ctx.beginPath();
+        ctx.arc(uv.x, uv.y, 5, 2*Math.PI, false);
+        ctx.fill();
+    }
+    
+    if (lsp.x != undefined && lsp.y != undefined && uv.x != undefined && uv.y != undefined)
+    {
+        // takes two normalized screenspace parameters - the lsp (light space position)
+        // and uv and returns the projected point on the uvbox for the line between them.
+        var intersectUvBox = function(lsp$nss, uv$nss)
+        {
+            // lsp$nss and uv$nss are in normalized screenspace (0-1).
+            
+            // first, convert lsp$nss and uv$nss to rays
+            var lspN = lsp$nss.clone();
+            var uvN = uv$nss.clone();
+            
+            GVec.uvToRay(lspN);
+            GVec.uvToRay(uvN);
+            
+            // extrude ray along line
+            var ray = GVec.aVecSub(uvN, lspN);
+            ray.normalize();
+            // ray.scale(1.41421356237);
+            ray.scale(4);
+            
+            if (false)
+            {
+                var outsidePoint = GVec.aVecAdd(uvN, ray);
+                var outsidePointTranslated = GVec.aVecSub(outsidePoint, lspN);
+                
+                var boxDim = GVec.aI(1,1);
+                
+                if (false)
+                {
+                    var outsidePointNormalize = outsidePoint;
+                    outsidePointNormalize.sub(lspN);
+                    outsidePointNormalize.normalize();
+                    
+                    var ff = function(x)
+                    {
+                        var ret = x.aVecMul(GVec.aI(screenDim.width, screenDim.height));
+                        ret.x += screenOffset.x;
+                        ret.y += screenOffset.y;
+                        return ret;
+                    };
+                    
+                    var start = ff(GVec.aI(0.5, 0.5));
+                    var end = ff(outsidePoint);
+                    
+                    ctx.strokeStyle = "black";
+                    ctx.beginPath();
+                    ctx.moveTo(start.x, start.y);
+                    ctx.lineTo(end.x, end.y);
+                    ctx.stroke();
+                }
+                
+                // mini box
+                if (true)
+                {
+                    var p0 = GVec.aI(lspN.x - boxDim, lspN.y - boxDim);
+                    var p1 = GVec.aI(lspN.x - boxDim, lspN.y + boxDim);
+                    var p2 = GVec.aI(lspN.x + boxDim, lspN.y + boxDim);
+                    var p3 = GVec.aI(lspN.x + boxDim, lspN.y - boxDim);
+                    
+                    p0 = GVec.rayToUv(p0);
+                    p1 = GVec.rayToUv(p1);
+                    p2 = GVec.rayToUv(p2);
+                    p3 = GVec.rayToUv(p3);
+                    
+                    p0.mul(GVec.aI(screenDim.width, screenDim.height));
+                    p1.mul(GVec.aI(screenDim.width, screenDim.height));
+                    p2.mul(GVec.aI(screenDim.width, screenDim.height));
+                    p3.mul(GVec.aI(screenDim.width, screenDim.height));
+                    
+                    p0.add(GVec.aI(screenOffset.x, screenOffset.y));
+                    p1.add(GVec.aI(screenOffset.x, screenOffset.y));
+                    p2.add(GVec.aI(screenOffset.x, screenOffset.y));
+                    p3.add(GVec.aI(screenOffset.x, screenOffset.y));
+                    
+                    ctx.strokeStyle = "rgb(40,255,40)";
+                    ctx.beginPath();
+                    ctx.moveTo(p0.x, p0.y);
+                    ctx.lineTo(p1.x, p1.y);
+                    ctx.lineTo(p2.x, p2.y);
+                    ctx.lineTo(p3.x, p3.y);
+                    ctx.lineTo(p0.x, p0.y);
+                    ctx.stroke();
+                }
+                
+                var borderPoint = outsidePointTranslated.aDivide(outsidePointTranslated.uniformNorm());
+                var scaledBorderPoint = borderPoint.aMul(boxDim);
+                var ret = GVec.aVecAdd(lspN, scaledBorderPoint);
+                return GVec.rayToUv(ret);
+            }
+            
+            // clip to box
+            var clipC = function (p0, p1, n)
+            {
+                var pe = n;
+                var d = GVec.aVecSub(p1, p0);
+                var t = GVec.vecDot2(n, GVec.aVecSub(p0, pe)) / -GVec.vecDot2(n, d);
+                return GVec.aVecScalarMulAndAdd(d, t, p0);
+            };
+            
+            var onBox = function (a)
+            {
+                return a.x >= -1 && a.x <= 1 && a.y >= -1 && a.y <= 1;
+            };
+            
+            // normal seems to be test, backward, so:
+            var n0 = GVec.aI( 1.0,  0.0); // right hand side
+            var n1 = GVec.aI(-1.0,  0.0); // left hand side
+            var n2 = GVec.aI( 0.0, -1.0); // bottom
+            var n3 = GVec.aI( 0.0,  1.0); // top
+            
+            var validMask = 15;
+            if (lspN.x < -1)
+                validMask &= ~4;
+            if (lspN.x > 1)
+                validMask &= ~8;
+            if (lspN.y < -1)
+                validMask &= ~2;
+            if (lspN.y > 1)
+                validMask &= ~1;
+            
+            if (uvN.y > lspN.y)
+                validMask &= ~2; // bottom
+            else
+                validMask &= ~1; // top
+            
+            if (uvN.x > lspN.x)
+                validMask &= ~4;
+            else
+                validMask &= ~8;
+            
+            var dest0;
+            var dest1;
+            var dest2;
+            var dest3;
+            
+            var dest0 = clipC(uvN, lspN, n0);
+            var dest1 = clipC(uvN, lspN, n1);
+            var dest2 = clipC(uvN, lspN, n2);
+            var dest3 = clipC(uvN, lspN, n3);
+            
+            if (false && ((g_Globals.frameCount % 100) == 1))
+            {
+                Debug.log("---------");
+                Debug.log("uv: %\n", uv.toString());
+                if (dest0)
+                    Debug.log("t0: %", dest0.toString());
+                if (dest1)
+                    Debug.log("t1: %", dest1.toString());
+                if (dest2)
+                    Debug.log("t2: %", dest2.toString());
+                if (dest3)
+                    Debug.log("t3: %", dest3.toString());
+                Debug.log("lspN: %", lspN.toString());
+                Debug.log("validMask: %b", validMask);
+            }
+            
+            if ((validMask & 8) && onBox(dest0))
+                return GVec.rayToUv(dest0);
+            if ((validMask & 4) && onBox(dest1))
+                return GVec.rayToUv(dest1);
+            if ((validMask & 2) && onBox(dest2))
+                return GVec.rayToUv(dest2);
+            if ((validMask & 1) && onBox(dest3))
+                return GVec.rayToUv(dest3);
+            
+            return GVec.rayToUv(uv);
+        };
+        
+        var lspV = GVec.aI(lsp.x - screenOffset.x, lsp.y  - screenOffset.y);
+        var uvV  = GVec.aI(uv.x  - screenOffset.x, uv.y   - screenOffset.y);
+        
+        // convert lsp to normalized screen space
+        var inv = GVec.aI(1.0/screenDim.width, 1.0/screenDim.height)
+        lspV.mul(inv);
+        uvV.mul(inv);
+        
+        var uv0 = intersectUvBox(lspV, uvV);
+        
+        var r;
+	var uv0N = uvV.aNormalize();
+        if (Math.abs(uv0N.x) > Math.abs(uv0N.y))
+	    r = "red";
+        else
+	    r = "blue";
+        
+        // convert uv0 from normalized sceen space to screen space
+        GVec.vecMul(uv0, uv0, GVec.aI(screenDim.width, screenDim.height));
+        uv0.x += screenOffset.x;
+        uv0.y += screenOffset.y;
+        
+        ctx.strokeStyle = "blue";
+        ctx.beginPath();
+        ctx.moveTo(lsp.x, lsp.y);
+        ctx.lineTo(uv.x, uv.y);
+        ctx.stroke();
+        
+        // draw line from uv to projected point
+	ctx.strokeStyle = r;
+        ctx.beginPath();
+        ctx.moveTo(uv.x, uv.y);
+        ctx.lineTo(uv0.x, uv0.y);
+        ctx.stroke();
+        
+        // draw circle at projected point
+        ctx.fillStyle = "blue";
+        ctx.beginPath();
+        ctx.arc(uv0.x, uv0.y, 5, 2*Math.PI, false);
+        ctx.fill();
+    }
+}
+
+function onMouseMove(view, e)
+{
+    if (g_Globals.lspGrab)
+    {
+        g_Globals.lsp.x = e.x;
+        g_Globals.lsp.y = e.y;
+    }
+    
+    if (g_Globals.uvGrab)
+    {
+        g_Globals.uv.x = e.x;
+        g_Globals.uv.y = e.y;
+    }
+}
+
+function onMouseUp(view, e)
+{
+    g_Globals.lspGrab = false;
+    g_Globals.uvGrab = false;
+}
+
+function onMouseDown(view, e)
+{
+    var lspGrab = false;
+    var uvGrab = false;
+    var d0 = GVec.distance(g_Globals.lsp.x, g_Globals.lsp.y, e.x, e.y) 
+    var d1 = GVec.distance(g_Globals.uv.x, g_Globals.uv.y, e.x, e.y);
+    if (d0 < 30)
+    {
+        lspGrab = true;
+    }
+    else if (d1 < 30)
+    {
+        uvGrab = true;
+    }
+    
+    g_Globals.lspGrab = lspGrab;
+    g_Globals.uvGrab = uvGrab;
+}
+
+function onContextMenuSelect (name, view, e)
+{
+    switch (name)
+    {
+    case "setLsp":
+        {
+            g_Globals.lsp.x = e.x;
+            g_Globals.lsp.y = e.y;
+            break;
+        }
+    case "setUv":
+        {
+            g_Globals.uv.x = e.x;
+            g_Globals.uv.y = e.y;
+            break;
+        }
+    }
+}
+
+window.onload = function ()
+{
+    var canvas = document.getElementById('tutorial');
+    if (canvas.getContext)
+    {
+        var ctx = canvas.getContext('2d');
+
+        // convert uv0 from normalized sceen space to screen space
+        var screenOffset = g_Globals.screenOffset;
+        var screenDim = g_Globals.screenDim;
+        
+        // debugger;
+        var view = new View(ctx, canvas);
+        
+        view.contextMenuUserCallback = onContextMenuSelect;
+        view.renderUserCallback = onRender;
+        view.mouseMoveUserCallback = onMouseMove;
+        view.mouseUpUserCallback = onMouseUp;
+        view.mouseDownUserCallback = onMouseDown;
+        
+        canvas.addEventListener('mousemove',  Utils.curry(view.mouseMoveEvent, view), false);
+        canvas.addEventListener('mousedown',  Utils.curry(view.mouseDownEvent, view), false);
+        canvas.addEventListener('mouseup',  Utils.curry(view.mouseUpEvent, view), false);
+        document.addEventListener('contextmenu',  Utils.curry(view.contextMenuEvent, view), false);
+    }
+}
+
+</script>
+    
+<!-- context menu -->
+<div id="context_menu" class="context_menu">
+<ul class="context_menu">
+<li>
+<a id="setLsp" href="#">Set Lsp</a>
+</li>
+<li>
+<a id="setUv" href="#">Set Uv</a>
+</li>
+</ul>
+<hr>
+<ul>
+<li class="topSep">
+<a id="disable_menu" href="#">Disable this menu</a>
+</li>
+</ul>
+</div>
+<canvas id="tutorial" width="512" height="512">
+</canvas>
+</body>
+</html>
